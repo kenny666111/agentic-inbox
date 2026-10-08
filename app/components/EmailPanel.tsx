@@ -108,7 +108,7 @@ export default function EmailPanel({ emailId }: { emailId: string }) {
 
 	const handleSendDraft = async (draftMsg?: Email) => {
 		let target = draftMsg || email;
-		if (!mailboxId || !currentMailbox) return;
+		if (!mailboxId || !currentMailbox || isSending) return;
 		setIsSending(true);
 		try {
 			if (!target.recipient || !target.subject) { try { const fresh = await api.getEmail(mailboxId, target.id) as Email; if (fresh) target = fresh; } catch {} }
@@ -119,6 +119,7 @@ export default function EmailPanel({ emailId }: { emailId: string }) {
 			const from = fromName && fromName !== currentMailbox.email ? { email: currentMailbox.email, name: fromName } : currentMailbox.email;
 			const originalEmail = target.in_reply_to ? allMessages.find((msg) => msg.id === target.in_reply_to) : undefined;
 			const emailData = {
+				send_id: target.id,
 				to: toEmailListValue(toRecipients),
 				cc: toEmailListValue(splitEmailList(target.cc)),
 				bcc: toEmailListValue(splitEmailList(target.bcc)),
@@ -129,7 +130,7 @@ export default function EmailPanel({ emailId }: { emailId: string }) {
 			};
 			if (originalEmail) await replyMut.mutateAsync({ mailboxId, emailId: originalEmail.id, email: emailData }); else await sendEmailMut.mutateAsync({ mailboxId, email: emailData });
 			await deleteEmailMut.mutateAsync({ mailboxId, id: target.id });
-			toastManager.add({ title: "Email sent!" });
+			toastManager.add({ title: "Email submitted!" });
 			if (isDraftFolder) closePanel();
 		} catch (err) {
 			const message = (err instanceof Error ? err.message : null) || "Failed to send email.";

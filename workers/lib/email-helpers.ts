@@ -82,11 +82,11 @@ export class SenderValidationError extends Error {
 /**
  * Generate an internal UUID and a proper RFC 2822 Message-ID.
  */
-export function generateMessageId(fromDomain: string): {
+export function generateMessageId(fromDomain: string, requestId?: string): {
 	messageId: string;
 	outgoingMessageId: string;
 } {
-	const messageId = crypto.randomUUID();
+	const messageId = requestId ? `sent-${requestId}` : crypto.randomUUID();
 	const outgoingMessageId = `${messageId}@${fromDomain}`;
 	return { messageId, outgoingMessageId };
 }

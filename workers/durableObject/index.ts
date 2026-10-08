@@ -9,6 +9,7 @@ import type { SQL } from "drizzle-orm";
 import * as schema from "../db/schema";
 import { Folders } from "../../shared/folders";
 import type { Env } from "../types";
+import type { SendReceipt } from "../email-sender";
 import { applyMigrations, mailboxMigrations } from "./migrations";
 
 /**
@@ -108,6 +109,44 @@ export class MailboxDO extends DurableObject<Env> {
 		this.db = drizzle(this.ctx.storage, { schema });
 		applyMigrations(this.ctx.storage.sql, mailboxMigrations, this.ctx.storage);
 	}
+
+	async prepareSendReceipt(id: string, fingerprint: string): Promise<SendReceipt> {
+        return this.ctx.storage.transaction(async (tx) => {
+            const key = `send-receipt:${id}`;
+            const existing = await tx.get<SendReceipt>(key);
+            if (existing && !existing.rejected && existing.fingerprint !== fingerprint) throw new Error("Send ID belongs to different content; keep the pending message unchanged.");
+            if (existing && !existing.rejected) return existing;
+            const receipt = { fingerprint, startedAt: Date.now() };
+            await tx.put(key, receipt);
+            return receipt;
+        });
+    }
+
+    async recordSendReceipt(id: string, receipt: SendReceipt): Promise<void> {
+        await this.ctx.storage.transaction(async (tx) => {
+            const key = `send-receipt:${id}`;
+            const existing = await tx.get<SendReceipt>(key);
+            if (!existing || existing.fingerprint !== receipt.fingerprint) throw new Error("Invalid send receipt.");
+            if (existing.providerId && existing.providerId !== receipt.providerId) throw new Error("Conflicting send receipt.");
+            await tx.put(key, { ...existing, ...receipt, messageId: receipt.messageId || existing.messageId });
+        });
+    }
+
+    storeSentEmail(email: EmailData, attachments: AttachmentData[] = []): void {
+        this.ctx.storage.transactionSync(() => {
+            if (this.db.select({ id: schema.emails.id }).from(schema.emails).where(eq(schema.emails.id, email.id)).get()) return;
+            this.createEmail(Folders.SENT, email, attachments);
+        });
+    }
+
+    findThreadByMessageIds(ids: string[]): string | null {
+        for (const id of [...ids].reverse()) {
+            const row = this.db.select({ threadId: schema.emails.thread_id }).from(schema.emails)
+                .where(eq(schema.emails.message_id, id)).limit(1).get();
+            if (row?.threadId) return row.threadId;
+        }
+        return null;
+    }
 
 	// ── Email CRUD (Drizzle) ───────────────────────────────────────
 
@@ -818,7 +857,7 @@ export class MailboxDO extends DurableObject<Env> {
 
 	// ── Email creation (Drizzle) ───────────────────────────────────
 
-	async createEmail(
+	createEmail(
 		folder: string,
 		email: EmailData,
 		attachments: AttachmentData[],

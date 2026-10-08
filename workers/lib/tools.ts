@@ -419,7 +419,7 @@ export async function toolSendReply(
 	const { originalMsgId, references, threadId } = buildReferencesChain(originalEmail);
 	const fromDomain = mailboxId.split("@")[1];
 	if (!fromDomain) throw new Error("Invalid mailbox email address");
-	const { messageId, outgoingMessageId } = generateMessageId(fromDomain);
+	let { messageId, outgoingMessageId } = generateMessageId(fromDomain);
 
 	// Verify and append quoted original message
 	const sanitizedBody = await verifyDraft(env.AI, params.bodyHtml);
@@ -434,20 +434,20 @@ export async function toolSendReply(
 	const fullBodyHtml = sanitizedBody + quotedBlock;
 
 	try {
-		await sendEmail(env.EMAIL, {
+		const sent = await sendEmail(env, {
 			to: params.to,
 			from: mailboxId,
 			subject: params.subject,
 			html: fullBodyHtml,
 			headers: buildThreadingHeaders(originalMsgId, references),
-		});
+		}, messageId);
+		outgoingMessageId = sent.messageId;
 	} catch (e) {
 		console.error("Email send failed:", (e as Error).message);
 		return { error: `Failed to send reply: ${(e as Error).message}` };
 	}
 
-	await stub.createEmail(
-		Folders.SENT,
+	await stub.storeSentEmail(
 		{
 			id: messageId,
 			subject: params.subject,
@@ -491,7 +491,7 @@ export async function toolSendEmail(
 
 	const fromDomain = mailboxId.split("@")[1];
 	if (!fromDomain) throw new Error("Invalid mailbox email address");
-	const { messageId, outgoingMessageId } = generateMessageId(fromDomain);
+	let { messageId, outgoingMessageId } = generateMessageId(fromDomain);
 
 	const sanitizedBody = await verifyDraft(env.AI, params.bodyHtml);
 	if (!sanitizedBody) {
@@ -499,19 +499,19 @@ export async function toolSendEmail(
 	}
 
 	try {
-		await sendEmail(env.EMAIL, {
+		const sent = await sendEmail(env, {
 			to: params.to,
 			from: mailboxId,
 			subject: params.subject,
 			html: sanitizedBody,
-		});
+		}, messageId);
+		outgoingMessageId = sent.messageId;
 	} catch (e) {
 		console.error("Email send failed:", (e as Error).message);
 		return { error: `Failed to send email: ${(e as Error).message}` };
 	}
 
-	await stub.createEmail(
-		Folders.SENT,
+	await stub.storeSentEmail(
 		{
 			id: messageId,
 			subject: params.subject,

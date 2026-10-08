@@ -70,13 +70,26 @@ function buildForwardBody(
 	return `<p><br></p>${sigBlock ? `${sigBlock}<br>` : ""}<div style="border: 1px solid #ddd; padding: 1em; background-color: #f9f9f9; margin: 1em 0;"><strong>Forwarded message:</strong><br><strong>From:</strong> ${safeSender}<br><strong>Date:</strong> ${formatComposeDate(original.date)}<br><strong>Subject:</strong> ${safeSubject}<br><br>${safeBody}</div>`;
 }
 
+
+function replyAddress(original: { sender: string; raw_headers?: string | null }): string {
+    try {
+        const headers = JSON.parse(original.raw_headers || "[]") as { key: string; value: string }[];
+        const value = headers.find((h) => h.key.toLowerCase() === "reply-to")?.value;
+        if (value) {
+            const candidate = value.match(/<([^>]+)>/)?.[1] || value.trim();
+            if (/^[^\s<>@,]+@[^\s<>@,]+$/.test(candidate)) return candidate;
+        }
+    } catch { /* Invalid stored headers fall back to From. */ }
+    return original.sender;
+}
+
 function buildReplyAllFields(
 	original: NonNullable<ReturnType<typeof useUIStore.getState>["composeOptions"]["originalEmail"]>,
 	selfAddress?: string,
 ) {
 	const toRecipients: string[] = [];
 	const toSeen = new Set<string>();
-	appendUniqueAddress(toRecipients, toSeen, original.sender, selfAddress);
+	appendUniqueAddress(toRecipients, toSeen, replyAddress(original), selfAddress);
 
 	for (const recipient of splitEmailList(original.recipient)) {
 		appendUniqueAddress(toRecipients, toSeen, recipient, selfAddress);
@@ -132,7 +145,7 @@ function buildInitialComposeFields(
 	if (mode === "reply") {
 		return {
 			...EMPTY_FIELDS,
-			to: original.sender,
+			to: replyAddress(original),
 			subject: getPrefixedSubject(original.subject, "Re"),
 			body: `<p><br></p>${sigBlock ? `${sigBlock}<br>` : ""}${buildQuotedReplyBlock(original.date, original.sender, original.body || "")}`,
 		};
@@ -182,6 +195,7 @@ export function useComposeForm(mailboxId?: string, _folder?: string) {
 	const [isSavingDraft, setIsSavingDraft] = useState(false);
 	const [isSending, setIsSending] = useState(false);
 	const lastInitializedOptionsRef = useRef<typeof composeOptions | null>(null);
+	const sendIdRef = useRef<string | null>(null);
 	const isDraftEdit = !!composeOptions.draftEmail;
 
 	const formTitle = useMemo(() => {
@@ -194,6 +208,7 @@ export function useComposeForm(mailboxId?: string, _folder?: string) {
 	useEffect(() => {
 		if (lastInitializedOptionsRef.current === composeOptions) return;
 		lastInitializedOptionsRef.current = composeOptions;
+		sendIdRef.current = composeOptions.draftEmail?.id || crypto.randomUUID();
 
 		const initialFields = buildInitialComposeFields(
 			composeOptions,
@@ -241,6 +256,7 @@ export function useComposeForm(mailboxId?: string, _folder?: string) {
 		const fromName = currentMailbox.settings?.fromName || currentMailbox.name;
 		const from = fromName && fromName !== currentMailbox.email ? { email: currentMailbox.email, name: fromName } : currentMailbox.email;
 		const emailData = {
+			send_id: sendIdRef.current || (sendIdRef.current = crypto.randomUUID()),
 			to: toEmailListValue(toRecipients),
 			cc: toEmailListValue(ccRecipients),
 			bcc: toEmailListValue(bccRecipients),
@@ -256,7 +272,7 @@ export function useComposeForm(mailboxId?: string, _folder?: string) {
 			else if (mode === "forward" && originalId) await forwardMutation.mutateAsync({ mailboxId, emailId: originalId, email: emailData });
 			else await sendEmailMutation.mutateAsync({ mailboxId, email: emailData });
 			if (draftId) deleteEmailMutation.mutate({ mailboxId, id: draftId });
-			toastManager.add({ title: "Email sent!" });
+			toastManager.add({ title: "Email submitted!" });
 			onClose();
 		} catch (err: unknown) { const message = (err instanceof Error ? err.message : null) || "Failed to send email."; setError(message); toastManager.add({ title: message, variant: "error" }); }
 		finally { setIsSending(false); }

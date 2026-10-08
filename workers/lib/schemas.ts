@@ -67,6 +67,7 @@ export const SendEmailRequestSchema = z
 			z.string().email(),
 			z.object({ email: z.string().email(), name: z.string() }),
 		]),
+		send_id: z.string().uuid().optional(),
 		subject: z.string(),
 		html: z.string().optional(),
 		text: z.string().optional(),
